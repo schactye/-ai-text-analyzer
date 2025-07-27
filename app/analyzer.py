@@ -5,23 +5,6 @@ from datetime import datetime
 from typing import List, Dict, Optional
 import logging
 
-# Импорты для NLP
-try:
-    from textblob import TextBlob
-except ImportError:
-    TextBlob = None
-
-try:
-    from langdetect import detect, detect_langs
-    from langdetect.lang_detect_exception import LangDetectException
-except ImportError:
-    detect = None
-
-try:
-    from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-except ImportError:
-    SentimentIntensityAnalyzer = None
-
 from app.models import (
     AnalysisResponse, SentimentResult, LanguageResult, 
     TextStatistics, KeywordResult, APIStats
@@ -41,23 +24,15 @@ class TextAnalyzer:
             'languages': Counter(),
         }
         
-        # Инициализация анализаторов
-        self.vader_analyzer = SentimentIntensityAnalyzer() if SentimentIntensityAnalyzer else None
-        
         # Словарь языков
         self.language_names = {
             'ru': 'Russian', 'en': 'English', 'es': 'Spanish', 'fr': 'French',
             'de': 'German', 'it': 'Italian', 'pt': 'Portuguese', 'nl': 'Dutch',
-            'pl': 'Polish', 'cs': 'Czech', 'sk': 'Slovak', 'uk': 'Ukrainian',
-            'bg': 'Bulgarian', 'hr': 'Croatian', 'sl': 'Slovenian', 'et': 'Estonian',
-            'lv': 'Latvian', 'lt': 'Lithuanian', 'hu': 'Hungarian', 'ro': 'Romanian',
-            'fi': 'Finnish', 'sv': 'Swedish', 'da': 'Danish', 'no': 'Norwegian'
         }
         
-        logger.info("🧠 TextAnalyzer инициализирован")
+        logger.info("TextAnalyzer инициализирован")
     
-    def analyze(self, text: str, include_keywords: bool = True, max_keywords: int = 10) -> 
-AnalysisResponse:
+    def analyze(self, text: str, include_keywords: bool = True, max_keywords: int = 10) -> AnalysisResponse:
         """Основная функция анализа текста"""
         start_time = time.time()
         
@@ -94,46 +69,26 @@ AnalysisResponse:
     def _analyze_sentiment(self, text: str) -> SentimentResult:
         """Анализ тональности текста"""
         try:
-            # Используем TextBlob как основной анализатор
-            if TextBlob:
-                blob = TextBlob(text)
-                polarity = blob.sentiment.polarity
-                subjectivity = blob.sentiment.subjectivity
-                
-                # Определяем метку
-                if polarity > 0.1:
-                    label = "positive"
-                elif polarity < -0.1:
-                    label = "negative"
-                else:
-                    label = "neutral"
-                
-                confidence = abs(polarity) if abs(polarity) > 0.1 else 0.5
-                
+            # Простой анализ по ключевым словам
+            positive_words = ['хорошо', 'отлично', 'прекрасно', 'замечательно', 'супер', 'великолепно', 'доволен', 'рекомендую']
+            negative_words = ['плохо', 'ужасно', 'отвратительно', 'кошмар', 'ужас', 'плохой', 'разочарован']
+            
+            text_lower = text.lower()
+            pos_count = sum(1 for word in positive_words if word in text_lower)
+            neg_count = sum(1 for word in negative_words if word in text_lower)
+            
+            if pos_count > neg_count:
+                label, polarity, confidence = "positive", 0.6, 0.7
+            elif neg_count > pos_count:
+                label, polarity, confidence = "negative", -0.6, 0.7
             else:
-                # Fallback: простой анализ по ключевым словам
-                positive_words = ['хорошо', 'отлично', 'прекрасно', 'замечательно', 'супер', 
-'великолепно']
-                negative_words = ['плохо', 'ужасно', 'отвратительно', 'кошмар', 'ужас', 'плохой']
-                
-                text_lower = text.lower()
-                pos_count = sum(1 for word in positive_words if word in text_lower)
-                neg_count = sum(1 for word in negative_words if word in text_lower)
-                
-                if pos_count > neg_count:
-                    label, polarity, confidence = "positive", 0.6, 0.7
-                elif neg_count > pos_count:
-                    label, polarity, confidence = "negative", -0.6, 0.7
-                else:
-                    label, polarity, confidence = "neutral", 0.0, 0.5
-                
-                subjectivity = 0.5
+                label, polarity, confidence = "neutral", 0.0, 0.5
             
             return SentimentResult(
                 label=label,
-                confidence=min(confidence, 1.0),
-                polarity=max(-1.0, min(1.0, polarity)),
-                subjectivity=max(0.0, min(1.0, subjectivity))
+                confidence=confidence,
+                polarity=polarity,
+                subjectivity=0.5
             )
             
         except Exception as e:
@@ -148,27 +103,13 @@ AnalysisResponse:
     def _detect_language(self, text: str) -> LanguageResult:
         """Определение языка текста"""
         try:
-            if detect and len(text.strip()) > 10:
-                # Используем langdetect
-                detected_lang = detect(text)
-                langs = detect_langs(text)
-                confidence = max([lang.prob for lang in langs if lang.lang == detected_lang])
-                
-                language_name = self.language_names.get(detected_lang, detected_lang.capitalize())
-                
-                return LanguageResult(
-                    language=detected_lang,
-                    language_name=language_name,
-                    confidence=confidence
-                )
+            # Простое определение по символам
+            if re.search(r'[а-яё]', text.lower()):
+                return LanguageResult(language="ru", language_name="Russian", confidence=0.8)
             else:
-                # Fallback: простое определение по символам
-                if re.search(r'[а-яё]', text.lower()):
-                    return LanguageResult(language="ru", language_name="Russian", confidence=0.8)
-                else:
-                    return LanguageResult(language="en", language_name="English", confidence=0.6)
+                return LanguageResult(language="en", language_name="English", confidence=0.6)
                     
-        except (LangDetectException, Exception) as e:
+        except Exception as e:
             logger.warning(f"Ошибка определения языка: {e}")
             return LanguageResult(language="unknown", language_name="Unknown", confidence=0.1)
     
@@ -188,7 +129,7 @@ AnalysisResponse:
             avg_word_length = sum(len(word) for word in words) / word_count if word_count > 0 else 0
             avg_sentence_length = word_count / sentence_count if sentence_count > 0 else 0
             
-            # Простой индекс читабельности (на основе длины слов и предложений)
+            # Простой индекс читабельности
             if word_count > 0 and sentence_count > 0:
                 readability = 100 - (avg_word_length * 5 + avg_sentence_length * 2)
                 readability = max(0, min(100, readability))
@@ -220,20 +161,10 @@ AnalysisResponse:
     def _extract_keywords(self, text: str, max_keywords: int = 10) -> List[KeywordResult]:
         """Извлечение ключевых слов"""
         try:
-            # Простая версия: частотный анализ с фильтрацией стоп-слов
+            # Простая версия: частотный анализ
             stop_words = {
-                'и', 'в', 'во', 'не', 'что', 'он', 'на', 'я', 'с', 'со', 'как', 'а', 'то', 'все', 
-'она', 'так',
-                'его', 'но', 'да', 'ты', 'к', 'у', 'же', 'вы', 'за', 'бы', 'по', 'только', 'ее', 
-'мне', 'было',
-                'вот', 'от', 'меня', 'еще', 'нет', 'о', 'из', 'ему', 'теперь', 'когда', 'даже', 'ну', 
-'вдруг',
-                'ли', 'если', 'уже', 'или', 'ни', 'быть', 'был', 'него', 'до', 'вас', 'нибудь', 
-'опять', 'уж',
-                'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 
-'are', 'was',
-                'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 
-'could', 'should'
+                'и', 'в', 'во', 'не', 'что', 'он', 'на', 'я', 'с', 'со', 'как', 'а', 'то', 'все', 'это',
+                'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are'
             }
             
             # Извлекаем слова
@@ -263,10 +194,8 @@ AnalysisResponse:
     def get_stats(self) -> APIStats:
         """Получение статистики использования API"""
         try:
-            avg_time = sum(self.stats['processing_times']) / len(self.stats['processing_times']) if 
-self.stats['processing_times'] else 0
-            most_common_lang = self.stats['languages'].most_common(1)[0][0] if self.stats['languages'] 
-else 'unknown'
+            avg_time = sum(self.stats['processing_times']) / len(self.stats['processing_times']) if self.stats['processing_times'] else 0
+            most_common_lang = self.stats['languages'].most_common(1)[0][0] if self.stats['languages'] else 'unknown'
             uptime = time.time() - self.start_time
             
             return APIStats(

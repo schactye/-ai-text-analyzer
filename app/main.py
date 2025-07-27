@@ -1,10 +1,10 @@
-code app/main.py
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 import logging
 from datetime import datetime
+from contextlib import asynccontextmanager
 
 from app.analyzer import TextAnalyzer
 from app.models import AnalysisRequest, AnalysisResponse
@@ -13,13 +13,29 @@ from app.models import AnalysisRequest, AnalysisResponse
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Глобальный анализатор
+analyzer = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Управление жизненным циклом приложения"""
+    global analyzer
+    # Startup
+    analyzer = TextAnalyzer()
+    logger.info("🚀 AI Text Analyzer запущен!")
+    logger.info("📝 Документация доступна по адресу: /docs")
+    yield
+    # Shutdown
+    logger.info("🛑 AI Text Analyzer остановлен")
+
 # Создание FastAPI приложения
 app = FastAPI(
     title="AI Text Analyzer",
     description="Мощный инструмент для анализа текста с использованием NLP и машинного обучения",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
 # Настройка CORS
@@ -30,15 +46,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Инициализация анализатора
-analyzer = TextAnalyzer()
-
-@app.on_startup
-async def startup_event():
-    """Инициализация при запуске приложения"""
-    logger.info("🚀 AI Text Analyzer запущен!")
-    logger.info("📝 Документация доступна по адресу: /docs")
 
 @app.get("/", tags=["Root"])
 async def root():
@@ -70,13 +77,14 @@ async def analyze_text(request: AnalysisRequest):
     - **include_keywords**: Включить извлечение ключевых слов (по умолчанию: true)
     - **max_keywords**: Максимальное количество ключевых слов (по умолчанию: 10)
     """
+    global analyzer
+    
     try:
         if not request.text or len(request.text.strip()) == 0:
             raise HTTPException(status_code=400, detail="Текст не может быть пустым")
         
         if len(request.text) > 10000:
-            raise HTTPException(status_code=400, detail="Текст слишком длинный (макс. 10000 
-символов)")
+            raise HTTPException(status_code=400, detail="Текст слишком длинный (макс. 10000 символов)")
         
         # Выполняем анализ
         result = analyzer.analyze(
@@ -98,6 +106,8 @@ async def batch_analyze(texts: List[str], max_keywords: int = 5):
     """
     Пакетный анализ нескольких текстов
     """
+    global analyzer
+    
     try:
         if len(texts) > 100:
             raise HTTPException(status_code=400, detail="Максимум 100 текстов за раз")
@@ -118,9 +128,9 @@ async def batch_analyze(texts: List[str], max_keywords: int = 5):
 @app.get("/stats", tags=["Statistics"])
 async def get_stats():
     """Статистика использования API"""
+    global analyzer
     return analyzer.get_stats()
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
-
